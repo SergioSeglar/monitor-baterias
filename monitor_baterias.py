@@ -1,13 +1,19 @@
 import os
 import json
 import time
+import threading
 from datetime import datetime
+from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 
+# Configurar Flask
+app = Flask(__name__)
+
+# Datos de configuración
 BASE_URL = "http://87.106.124.228:3000"
 COOKIE = {
     "name": "grafana_session",
@@ -70,13 +76,21 @@ def enviar_a_google_sheets(resultados):
     valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
     worksheet.update("B2:E6", valores)
 
-if __name__ == "__main__":
+def bucle():
     while True:
         hora = datetime.now().hour
         if hora >= 22 or hora < 6:
-            resultados = obtener_datos()
-            enviar_a_google_sheets(resultados)
+            print("Ejecutando monitoreo...")
+            datos = obtener_datos()
+            enviar_a_google_sheets(datos)
         else:
-            print("Fuera del horario de monitoreo (22:00 a 06:00)")
+            print("Fuera del horario (22:00 - 6:00)")
+        time.sleep(600)
 
-        time.sleep(600)  # Espera 10 minutos
+@app.route("/")
+def home():
+    return "Monitoreo de baterías activo."
+
+if __name__ == "__main__":
+    threading.Thread(target=bucle).start()
+    app.run(host="0.0.0.0", port=10000)
