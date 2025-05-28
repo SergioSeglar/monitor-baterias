@@ -23,4 +23,4 @@ jobs:
         env:
           GRAFANA_SESSION: ${{ secrets.GRAFANA_SESSION }}
           GOOGLE_CREDENTIALS_JSON: ${{ secrets.GOOGLE_CREDENTIALS_JSON }}
-        run: python script.py
+        run: python monitor_baterias.py
