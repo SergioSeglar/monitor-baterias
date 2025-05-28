@@ -9,6 +9,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
+from pytz import timezone
 
 # Configurar Flask
 app = Flask(__name__)
@@ -72,13 +73,13 @@ def enviar_a_google_sheets(resultados):
     worksheet.update("A1:E1", [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]])
     worksheet.update("A2:A6", [[nombre] for nombre, _ in baterias])
 
-    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
     valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
     worksheet.update("B2:E6", valores)
 
 def bucle():
     while True:
-        hora = datetime.now().hour
+        hora = datetime.now(timezone("Europe/Madrid")).hour
         if hora >= 22 or hora < 6:
             print("Ejecutando monitoreo...")
             datos = obtener_datos()
