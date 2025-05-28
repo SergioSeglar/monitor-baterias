@@ -1,17 +1,17 @@
+import os
+import json
 import time
+from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
-from datetime import datetime
 
-CHROMEDRIVER_PATH = "/usr/bin/chromedriver"  # Ruta estándar en Railway
 BASE_URL = "http://87.106.124.228:3000"
 COOKIE = {
     "name": "grafana_session",
-    "value": "dd88454d575a37340ea2ae0ff9ec85b4",
+    "value": os.environ.get("GRAFANA_SESSION", ""),
     "domain": "87.106.124.228",
     "path": "/",
 }
@@ -28,13 +28,11 @@ def limpiar_valor(valor):
     return float(valor.replace('%', '').replace('V', '').replace('A', '').replace(',', '.').strip())
 
 def obtener_datos():
-    options = Options()
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-
-    service = Service(CHROMEDRIVER_PATH)
-    driver = webdriver.Chrome(service=service, options=options)
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=chrome_options)
 
     driver.get(BASE_URL)
     time.sleep(2)
@@ -58,22 +56,27 @@ def obtener_datos():
 
 def enviar_a_google_sheets(resultados):
     scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-    creds = ServiceAccountCredentials.from_json_keyfile_name("credenciales.json", scope)
+    creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+    creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
     client = gspread.authorize(creds)
 
     sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
     worksheet = sheet.worksheet("Datos")
 
-    encabezados = [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]]
-    nombres = [[nombre] for nombre, _ in baterias]
-    worksheet.update("A1:E1", encabezados)
-    worksheet.update("A2:A6", nombres)
+    worksheet.update("A1:E1", [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]])
+    worksheet.update("A2:A6", [[nombre] for nombre, _ in baterias])
 
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
     worksheet.update("B2:E6", valores)
 
 if __name__ == "__main__":
-    resultados = obtener_datos()
-    enviar_a_google_sheets(resultados)
-    print("Datos enviados correctamente.")
+    while True:
+        hora = datetime.now().hour
+        if hora >= 22 or hora < 6:
+            resultados = obtener_datos()
+            enviar_a_google_sheets(resultados)
+        else:
+            print("Fuera del horario de monitoreo (22:00 a 06:00)")
+
+        time.sleep(600)  # Espera 10 minutos
