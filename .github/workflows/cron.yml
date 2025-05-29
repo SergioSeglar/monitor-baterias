@@ -2,7 +2,7 @@ name: Ejecutar monitoreo
 
 on:
   schedule:
-    - cron: "*/2 * * * *"  # Cada 2 minutos (en horario UTC)
+    - cron: "*/10 * * * *"  # Cada 2 minutos (en horario UTC)
   workflow_dispatch:        # Permite ejecución manual desde GitHub
 
 jobs:
