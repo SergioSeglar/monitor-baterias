@@ -1,19 +1,19 @@
 import os
 import json
 import time
+import logging
 from datetime import datetime
+from flask import Flask, jsonify
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
-import logging
 
-# Configura el log para ver en Render
+app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
-# Configuración
 BASE_URL = "http://87.106.124.228:3000"
 COOKIE = {
     "name": "grafana_session",
@@ -76,15 +76,18 @@ def enviar_a_google_sheets(resultados):
     valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
     worksheet.update("B2:E6", valores)
 
-def main():
+@app.route("/run", methods=["GET"])
+def ejecutar_monitoreo():
     hora = datetime.now(timezone("Europe/Madrid")).hour
     if hora >= 22 or hora < 6:
         logging.info("Ejecutando monitoreo de baterías...")
         datos = obtener_datos()
         enviar_a_google_sheets(datos)
         logging.info("Monitoreo completado.")
+        return jsonify({"status": "ok", "mensaje": "Monitoreo ejecutado correctamente."})
     else:
-        logging.info("Fuera del horario (22:00 - 6:00). No se ejecuta el monitoreo.")
+        logging.info("Fuera del horario. No se ejecuta.")
+        return jsonify({"status": "fuera de horario", "mensaje": "Solo se ejecuta entre las 22:00 y las 6:00 (hora Madrid)."})
 
 if __name__ == "__main__":
-    main()
+    app.run(host="0.0.0.0", port=10000)
