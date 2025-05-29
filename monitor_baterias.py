@@ -5,24 +5,16 @@ from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from flask import Flask
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
-import threading
 import logging
+from flask import Flask
 
-# Configura log para ver en Render
+# Configura el log para ver en Render
 logging.basicConfig(level=logging.INFO)
 
-# Flask app para mantener viva la instancia
-app = Flask(__name__)
-
-@app.route("/ping")
-def ping():
-    return "pong"
-
-# Configuración general
+# Configuración
 BASE_URL = "http://87.106.124.228:3000"
 COOKIE = {
     "name": "grafana_session",
@@ -86,24 +78,26 @@ def enviar_a_google_sheets(resultados):
     worksheet.update("B2:E6", valores)
 
 def monitorear():
-    while True:
-        hora = datetime.now(timezone("Europe/Madrid")).hour
-        if hora >= 22 or hora < 6:
-            logging.info("Ejecutando monitoreo de baterías...")
-            try:
-                datos = obtener_datos()
-                enviar_a_google_sheets(datos)
-                logging.info("Monitoreo completado.")
-            except Exception as e:
-                logging.error(f"Error en monitoreo: {e}")
-        else:
-            logging.info("Fuera del horario (22:00 - 6:00). No se ejecuta el monitoreo.")
-        time.sleep(600)  # Esperar 10 minutos
+    hora = datetime.now(timezone("Europe/Madrid")).hour
+    if hora >= 22 or hora < 6:
+        logging.info("Ejecutando monitoreo de baterías...")
+        datos = obtener_datos()
+        enviar_a_google_sheets(datos)
+        logging.info("Monitoreo completado.")
+    else:
+        logging.info("Fuera del horario (22:00 - 6:00). No se ejecuta el monitoreo.")
 
-def main():
-    t = threading.Thread(target=monitorear)
-    t.start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+# Servidor Flask para mantener el servicio activo en Render
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "<h2>🟢 El monitoreo de baterías está activo.</h2><p>Este servicio se ejecuta automáticamente entre las 22:00 y las 06:00 (hora de Madrid).</p>"
+
+@app.route("/ping")
+def ping():
+    return "pong"
 
 if __name__ == "__main__":
-    main()
+    monitorear()
+    app.run(host="0.0.0.0", port=10000)
