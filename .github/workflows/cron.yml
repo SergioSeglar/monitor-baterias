@@ -2,13 +2,12 @@ name: Ejecutar monitoreo
 
 on:
   schedule:
-    - cron: "*/10 * * * *"  # Cada 2 minutos (en horario UTC)
-  workflow_dispatch:        # Permite ejecución manual desde GitHub
+    - cron: "*/10 * * * *"  # cada 10 minutos
+  workflow_dispatch:        # permite ejecución manual
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v3
 
