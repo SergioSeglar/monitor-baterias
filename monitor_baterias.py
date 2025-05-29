@@ -2,6 +2,7 @@ import os
 import json
 import time
 from datetime import datetime
+from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -9,9 +10,8 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
 import logging
-from flask import Flask
 
-# Configura el log para ver en Render
+app = Flask(__name__)
 logging.basicConfig(level=logging.INFO)
 
 # Configuración
@@ -77,7 +77,7 @@ def enviar_a_google_sheets(resultados):
     valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
     worksheet.update("B2:E6", valores)
 
-def monitorear():
+def ejecutar_monitoreo():
     hora = datetime.now(timezone("Europe/Madrid")).hour
     if hora >= 22 or hora < 6:
         logging.info("Ejecutando monitoreo de baterías...")
@@ -87,17 +87,11 @@ def monitorear():
     else:
         logging.info("Fuera del horario (22:00 - 6:00). No se ejecuta el monitoreo.")
 
-# Servidor Flask para mantener el servicio activo en Render
-app = Flask(__name__)
-
 @app.route("/")
 def home():
-    return "<h2>🟢 El monitoreo de baterías está activo.</h2><p>Este servicio se ejecuta automáticamente entre las 22:00 y las 06:00 (hora de Madrid).</p>"
-
-@app.route("/ping")
-def ping():
-    return "pong"
+    logging.info("Llamada desde cron-job recibida, ejecutando monitoreo...")
+    ejecutar_monitoreo()
+    return "✅ Monitoreo de baterías ejecutado correctamente."
 
 if __name__ == "__main__":
-    monitorear()
     app.run(host="0.0.0.0", port=10000)
