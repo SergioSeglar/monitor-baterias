@@ -2,7 +2,8 @@ name: Ejecutar monitoreo
 
 on:
   schedule:
-    - cron: "*/10 * * * *"  # cada 10 minutos
+    - cron: "*/10 22-23 * * *" # cada 10 minutos
+    - cron: "*/10 0-5 * * *"
   workflow_dispatch:        # permite ejecución manual
 
 jobs:
