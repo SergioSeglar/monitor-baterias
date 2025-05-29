@@ -2,15 +2,19 @@ name: Ejecutar monitoreo
 
 on:
   schedule:
-    - cron: "*/10 22-23 * * *" # cada 10 minutos
-    - cron: "*/10 0-5 * * *"
-  workflow_dispatch:        # permite ejecución manual
+    - cron: "*/10 20-21 * * *"  # 22:00–23:59 (España)
+    - cron: "*/10 22-23 * * *"  # 00:00–01:59
+    - cron: "*/10 0-2 * * *"    # 02:00–04:59
+    - cron: "*/10 3 * * *"      # 05:00–05:59
+  workflow_dispatch:           # Permite ejecución manual
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout del código
+        uses: actions/checkout@v3
 
       - name: Configurar Python
         uses: actions/setup-python@v4
