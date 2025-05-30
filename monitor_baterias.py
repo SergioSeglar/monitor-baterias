@@ -87,7 +87,7 @@ def ejecutar_monitoreo():
     else:
         logging.info("Fuera del horario (22:00 - 6:00). No se ejecuta el monitoreo.")
 
-@app.route("/", methods=["GET", "HEAD"])
+@app.route("/")
 def home():
     logging.info("Llamada desde cron-job recibida, ejecutando monitoreo...")
     ejecutar_monitoreo()
