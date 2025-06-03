@@ -78,16 +78,24 @@ def enviar_a_google_sheets(resultados):
     valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
     worksheet.update("B2:E6", valores)
 
+
 def bucle():
     while True:
-        hora = datetime.now(timezone("Europe/Madrid")).hour
-        if hora >= 22 or hora < 6:
-            print("Ejecutando monitoreo...")
-            datos = obtener_datos()
-            enviar_a_google_sheets(datos)
+        ahora = datetime.now(timezone("Europe/Madrid"))
+        hora = ahora.hour
+        dia_semana = ahora.weekday()  # 0 = lunes, 6 = domingo
+
+        if dia_semana < 5:  # Solo de lunes a viernes (0 a 4)
+            if hora >= 22 or hora < 6:
+                print("Ejecutando monitoreo...")
+                datos = obtener_datos()
+                enviar_a_google_sheets(datos)
+            else:
+                print("Fuera del horario (22:00 - 6:00)")
         else:
-            print("Fuera del horario (22:00 - 6:00)")
-        time.sleep(600)
+            print("Fin de semana: no se ejecuta el monitoreo")
+
+        time.sleep(600)  # Esperar 10 minutos
 
 @app.route("/")
 def home():
