@@ -83,19 +83,28 @@ def bucle():
     while True:
         ahora = datetime.now(timezone("Europe/Madrid"))
         hora = ahora.hour
-        dia_semana = ahora.weekday()  # 0 = lunes, 6 = domingo
+        dia_semana = ahora.weekday()  # lunes = 0 ... domingo = 6
 
-        if dia_semana < 5:  # Solo de lunes a viernes (0 a 4)
-            if hora >= 22 or hora < 6:
-                print("Ejecutando monitoreo...")
-                datos = obtener_datos()
-                enviar_a_google_sheets(datos)
-            else:
-                print("Fuera del horario (22:00 - 6:00)")
+        ejecutar = False
+
+        # De lunes a jueves: si es entre 22:00 y 6:00
+        if dia_semana in range(0, 4) and (hora >= 22 or hora < 6):
+            ejecutar = True
+        # Viernes por la noche (22:00 en adelante)
+        elif dia_semana == 4 and hora >= 22:
+            ejecutar = True
+        # Sábado de madrugada hasta las 6:00
+        elif dia_semana == 5 and hora < 6:
+            ejecutar = True
+
+        if ejecutar:
+            print("Ejecutando monitoreo...")
+            datos = obtener_datos()
+            enviar_a_google_sheets(datos)
         else:
-            print("Fin de semana: no se ejecuta el monitoreo")
+            print("Fuera del horario permitido")
 
-        time.sleep(600)  # Esperar 10 minutos
+        time.sleep(600)  # Espera 10 minutos
 
 @app.route("/")
 def home():
