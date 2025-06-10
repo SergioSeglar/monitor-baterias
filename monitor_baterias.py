@@ -86,7 +86,7 @@ def bucle():
         ejecutar = False
 
         # De lunes a viernes de 22:00 a 23:59
-        if dia_semana in range(0, 5) and hora >= 22:
+        if dia_semana in range(0, 5) and hora >= 21:
             ejecutar = True
         # De martes a sábado de 00:00 a 05:59
         elif dia_semana in range(1, 6) and hora < 6:
