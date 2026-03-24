@@ -6,8 +6,8 @@ from datetime import datetime
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.common.by import By
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
@@ -34,7 +34,7 @@ baterias = [
 
 # --- FUNCIONES ---
 def limpiar_valor(valor):
-    """Convierte un valor a float si es posible, devuelve None si no hay valor válido"""
+    """Convierte a float si es posible, None si no hay valor válido"""
     if not valor:
         return None
     valor = valor.replace('%', '').replace('V', '').replace('A', '').replace(',', '.').strip()
@@ -46,8 +46,9 @@ def limpiar_valor(valor):
         return None
 
 def crear_driver():
+    """Crea un driver headless compatible con Render Linux"""
     options = Options()
-    options.binary_location = "/usr/bin/chromium"  # Path en Render
+    options.binary_location = "/usr/bin/chromium"
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -57,18 +58,26 @@ def crear_driver():
 
 def obtener_datos():
     driver = crear_driver()
+
+    # Abrir página base y aplicar cookie
     driver.get(BASE_URL)
     time.sleep(2)
     driver.add_cookie(COOKIE)
+    driver.refresh()  # aplicar la cookie correctamente
+    time.sleep(2)
 
     resultados = []
     for nombre, url in baterias:
         driver.get(url)
-        time.sleep(4)
+        time.sleep(7)  # tiempo para que cargue todo
         elements = driver.find_elements(By.CLASS_NAME, "flot-temp-elem")
+
+        # Debug: imprime primeros elementos para verificar
+        print(f"{nombre}: {[e.text for e in elements[:6]]}")
+
         if len(elements) >= 6:
             soc = limpiar_valor(elements[0].text) or "N/A"
-            voltaje = elements[1].text
+            voltaje = elements[1].text or "N/A"
             amperaje = limpiar_valor(elements[5].text) or "N/A"
             resultados.append((soc, voltaje, amperaje))
         else:
@@ -88,18 +97,16 @@ def enviar_a_google_sheets(resultados):
 
     timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
 
-    valores = [
-        [
-            nombre,
-            f"{soc}%" if soc != "N/A" else "N/A",
-            voltaje,
-            f"{amperaje}A" if amperaje != "N/A" else "N/A",
-            timestamp
-        ]
-        for (nombre, _), (soc, voltaje, amperaje) in zip(baterias, resultados)
-    ]
+    valores = []
+    for (nombre, _), (soc, voltaje, amperaje) in zip(baterias, resultados):
+        soc_str = f"{soc}%" if soc not in [None, "N/A"] else "N/A"
+        amperaje_str = f"{amperaje}A" if amperaje not in [None, "N/A"] else "N/A"
+        voltaje_str = voltaje if voltaje not in [None, ""] else "N/A"
+        valores.append([nombre, soc_str, voltaje_str, amperaje_str, timestamp])
 
-    worksheet.update("A1:E6", [["BATERÍA","SOC (%)","VOLTAJE","AMPERAJE","ÚLTIMA ACTUALIZACIÓN"]] + valores)
+    # Encabezado + datos
+    worksheet.update("A1:E1", [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]])
+    worksheet.update(f"A2:E{len(baterias)+1}", valores)
 
 def bucle():
     while True:
