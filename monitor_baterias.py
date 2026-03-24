@@ -6,16 +6,15 @@ from datetime import datetime
 from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
 
-# --- FLASK SOLO PARA CRON-JOB ---
+# Configurar Flask
 app = Flask(__name__)
 
-# --- CONFIGURACIÓN ---
+# Datos de configuración
 BASE_URL = "http://87.106.124.228:3000"
 COOKIE = {
     "name": "grafana_session",
@@ -32,53 +31,29 @@ baterias = [
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
-# --- FUNCIONES ---
 def limpiar_valor(valor):
-    """Convierte a float si es posible, None si no hay valor válido"""
-    if not valor:
-        return None
-    valor = valor.replace('%', '').replace('V', '').replace('A', '').replace(',', '.').strip()
-    if valor in ['N/', 'N/A', '-', '']:
-        return None
-    try:
-        return float(valor)
-    except:
-        return None
-
-def crear_driver():
-    """Crea un driver headless compatible con Render Linux"""
-    options = Options()
-    options.binary_location = "/usr/bin/chromium"
-    options.add_argument("--headless=new")
-    options.add_argument("--no-sandbox")
-    options.add_argument("--disable-dev-shm-usage")
-    options.add_argument("--disable-gpu")
-    service = Service("/usr/bin/chromedriver")
-    return webdriver.Chrome(service=service, options=options)
+    return float(valor.replace('%', '').replace('V', '').replace('A', '').replace(',', '.').strip())
 
 def obtener_datos():
-    driver = crear_driver()
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    driver = webdriver.Chrome(options=chrome_options)
 
-    # Abrir página base y aplicar cookie
     driver.get(BASE_URL)
     time.sleep(2)
     driver.add_cookie(COOKIE)
-    driver.refresh()  # aplicar la cookie correctamente
-    time.sleep(2)
 
     resultados = []
-    for nombre, url in baterias:
+    for _, url in baterias:
         driver.get(url)
-        time.sleep(7)  # tiempo para que cargue todo
+        time.sleep(7)
         elements = driver.find_elements(By.CLASS_NAME, "flot-temp-elem")
-
-        # Debug: imprime primeros elementos para verificar
-        print(f"{nombre}: {[e.text for e in elements[:6]]}")
-
         if len(elements) >= 6:
-            soc = limpiar_valor(elements[0].text) or "N/A"
-            voltaje = elements[1].text or "N/A"
-            amperaje = limpiar_valor(elements[5].text) or "N/A"
+            soc = limpiar_valor(elements[0].text)
+            voltaje = elements[1].text
+            amperaje = limpiar_valor(elements[5].text)
             resultados.append((soc, voltaje, amperaje))
         else:
             resultados.append(("N/A", "N/A", "N/A"))
@@ -95,45 +70,41 @@ def enviar_a_google_sheets(resultados):
     sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
     worksheet = sheet.worksheet("Datos")
 
-    timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
-
-    valores = []
-    for (nombre, _), (soc, voltaje, amperaje) in zip(baterias, resultados):
-        soc_str = f"{soc}%" if soc not in [None, "N/A"] else "N/A"
-        amperaje_str = f"{amperaje}A" if amperaje not in [None, "N/A"] else "N/A"
-        voltaje_str = voltaje if voltaje not in [None, ""] else "N/A"
-        valores.append([nombre, soc_str, voltaje_str, amperaje_str, timestamp])
-
-    # Encabezado + datos
     worksheet.update("A1:E1", [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]])
-    worksheet.update(f"A2:E{len(baterias)+1}", valores)
+    worksheet.update("A2:A6", [[nombre] for nombre, _ in baterias])
+
+    timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
+    valores = [[f"{soc}%", voltaje, f"{amperaje}A", timestamp] for soc, voltaje, amperaje in resultados]
+    worksheet.update("B2:E6", valores)
 
 def bucle():
     while True:
-        try:
-            ahora = datetime.now(timezone("Europe/Madrid"))
-            hora = ahora.hour
-            dia_semana = ahora.weekday()  # lunes=0
+        ahora = datetime.now(timezone("Europe/Madrid"))
+        hora = ahora.hour
+        dia_semana = ahora.weekday()  # lunes = 0 ... domingo = 6
 
-            ejecutar = (dia_semana in range(0,5) and hora >= 21) or (dia_semana in range(1,6) and hora < 6)
+        ejecutar = False
 
-            if ejecutar:
-                print(f"[INFO] Ejecutando monitoreo... ({ahora.strftime('%H:%M:%S')})")
-                datos = obtener_datos()
-                enviar_a_google_sheets(datos)
-            else:
-                print(f"[INFO] Fuera del horario permitido ({ahora.strftime('%H:%M:%S')})")
-        except Exception as e:
-            print(f"[ERROR] {e}")
+        # De lunes a viernes de 22:00 a 23:59
+        if dia_semana in range(0, 5) and hora >= 22:
+            ejecutar = True
+        # De martes a sábado de 00:00 a 05:59
+        elif dia_semana in range(1, 6) and hora < 6:
+            ejecutar = True
 
-        time.sleep(600)  # 10 minutos
+        if ejecutar:
+            print(f"[INFO] Ejecutando monitoreo... ({ahora.strftime('%H:%M:%S')})")
+            datos = obtener_datos()
+            enviar_a_google_sheets(datos)
+        else:
+            print(f"[INFO] Fuera del horario permitido ({ahora.strftime('%H:%M:%S')})")
 
-# --- RUTA PARA CRON-JOB ---
+        time.sleep(600)  # Espera 10 minutos
+
 @app.route("/")
 def home():
     return "Monitoreo de baterías activo."
 
-# --- INICIO ---
 if __name__ == "__main__":
-    threading.Thread(target=bucle, daemon=True).start()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
+    threading.Thread(target=bucle).start()
+    app.run(host="0.0.0.0", port=10000)
