@@ -3,6 +3,7 @@ import json
 import time
 import threading
 from datetime import datetime
+
 from flask import Flask
 
 from selenium import webdriver
@@ -15,9 +16,19 @@ import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
 
-# ================= CONFIG =================
+# ================= FLASK (KEEP ALIVE RENDER FREE) =================
 
 app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "OK"
+
+@app.route("/health")
+def health():
+    return "alive"
+
+# ================= CONFIG =================
 
 BASE_URL = "http://87.106.124.228:3000/login"
 
@@ -25,14 +36,15 @@ GRAFANA_USER = os.environ.get("GRAFANA_USER")
 GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
 baterias = [
-    ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10"),
-    ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9"),
-    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8"),
-    ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7"),
-    ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6"),
+    ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
+    ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
+    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?refresh=1m"),
+    ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
+    ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
 driver = None
+contador = 0
 
 # ================= UTIL =================
 
@@ -48,68 +60,75 @@ def limpiar_valor(valor):
     except:
         return None
 
+# ================= DRIVER =================
+
+def crear_driver():
+    options = Options()
+    options.add_argument("--headless=new")
+    options.add_argument("--no-sandbox")
+    options.add_argument("--disable-dev-shm-usage")
+    options.add_argument("--disable-gpu")
+    options.add_argument("--window-size=1920,1080")
+
+    return webdriver.Chrome(options=options)
+
 # ================= LOGIN =================
 
-def hacer_login(driver):
-    print("[INFO] Haciendo login en Grafana...")
+def login(driver):
+    print("[INFO] Login Grafana...")
 
     driver.get(BASE_URL)
 
     wait = WebDriverWait(driver, 15)
 
-    try:
-        user_input = wait.until(EC.presence_of_element_located((By.NAME, "user")))
-        pass_input = driver.find_element(By.NAME, "password")
-        login_button = driver.find_element(By.XPATH, "//button")
+    user = wait.until(EC.presence_of_element_located((By.NAME, "user")))
+    password = driver.find_element(By.NAME, "password")
 
-        user_input.send_keys(GRAFANA_USER)
-        pass_input.send_keys(GRAFANA_PASSWORD)
-        login_button.click()
+    user.send_keys(GRAFANA_USER)
+    password.send_keys(GRAFANA_PASSWORD)
 
-        # Esperar a que desaparezca login (o cargue dashboard)
-        wait.until(EC.url_contains("/"))
+    driver.find_element(By.XPATH, "//button").click()
 
-        print("[INFO] Login correcto")
+    time.sleep(2)
 
-    except Exception as e:
-        print(f"[ERROR] Login fallido: {e}")
-        raise
+    print("[INFO] Login correcto")
 
-# ================= DRIVER =================
+# ================= DRIVER CONTROL =================
 
-def obtener_driver():
+def get_driver():
     global driver
 
     if driver is None:
-        chrome_options = Options()
-        chrome_options.add_argument("--headless=new")
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-gpu")
-        chrome_options.add_argument("--window-size=1920,1080")
-
-        driver = webdriver.Chrome(options=chrome_options)
-
-        hacer_login(driver)
+        driver = crear_driver()
+        login(driver)
 
     return driver
+
+def reset_driver():
+    global driver
+
+    try:
+        if driver:
+            driver.quit()
+    except:
+        pass
+
+    driver = None
 
 # ================= SCRAPING =================
 
 def obtener_datos():
-    global driver
-
-    driver = obtener_driver()
+    driver = get_driver()
     resultados = []
 
     for _, url in baterias:
         try:
             driver.get(url)
 
-            # Detectar si nos ha devuelto al login (sesión expirada)
             if "login" in driver.current_url:
-                print("[WARN] Sesión expirada, re-logueando...")
-                hacer_login(driver)
+                print("[WARN] Sesión caída, relogin...")
+                reset_driver()
+                driver = get_driver()
                 driver.get(url)
 
             elements = WebDriverWait(driver, 15).until(
@@ -127,33 +146,35 @@ def obtener_datos():
             resultados.append((soc, voltaje, amperaje))
 
         except Exception as e:
-            print(f"[ERROR] Scraping: {e}")
+            print(f"[ERROR] {e}")
             resultados.append(("N/A", "N/A", "N/A"))
 
     return resultados
 
 # ================= GOOGLE SHEETS =================
 
-def enviar_a_google_sheets(resultados):
+def enviar_sheets(resultados):
     try:
         scope = [
             "https://spreadsheets.google.com/feeds",
             "https://www.googleapis.com/auth/drive"
         ]
 
-        creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
-        creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
-        client = gspread.authorize(creds)
+        creds = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
+        client = gspread.authorize(
+            ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
+        )
 
         sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
-        worksheet = sheet.worksheet("Datos")
+        ws = sheet.worksheet("Datos")
 
         timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
 
-        data = [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]]
+        data = [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "HORA"]]
 
         for i, (nombre, _) in enumerate(baterias):
             soc, voltaje, amperaje = resultados[i]
+
             data.append([
                 nombre,
                 f"{soc}%" if soc is not None else "N/A",
@@ -162,58 +183,55 @@ def enviar_a_google_sheets(resultados):
                 timestamp
             ])
 
-        worksheet.update("A1:E6", data)
+        ws.update("A1:E6", data)
 
     except Exception as e:
-        print(f"[ERROR] Google Sheets: {e}")
+        print(f"[ERROR SHEETS] {e}")
 
-# ================= BUCLE =================
+# ================= HORARIO =================
 
-def dentro_de_horario():
+def dentro_horario():
     ahora = datetime.now(timezone("Europe/Madrid"))
-    hora = ahora.hour
-    dia = ahora.weekday()
+    h = ahora.hour
+    d = ahora.weekday()
 
-    return (
-        (dia in range(0, 5) and hora >= 22) or
-        (dia in range(1, 6) and hora < 6)
-    )
+    return (d in range(0, 5) and h >= 22) or (d in range(1, 6) and h < 6)
 
-def bucle():
-    global driver
+# ================= LOOP PRINCIPAL =================
+
+def ciclo():
+    global contador
 
     while True:
-        ahora = datetime.now(timezone("Europe/Madrid")).strftime("%H:%M:%S")
+        contador += 1
 
-        if dentro_de_horario():
-            print(f"[INFO] Ejecutando monitoreo ({ahora})")
+        print(f"[INFO] Ciclo {contador}")
 
-            try:
+        try:
+            if dentro_horario():
+                print("[INFO] Ejecutando...")
+
                 datos = obtener_datos()
-                enviar_a_google_sheets(datos)
+                enviar_sheets(datos)
 
-            except Exception as e:
-                print(f"[ERROR] Ciclo: {e}")
+            else:
+                print("[INFO] Fuera de horario")
 
-                if driver:
-                    driver.quit()
-                    driver = None  # fuerza relogin
+        except Exception as e:
+            print(f"[ERROR GLOBAL] {e}")
+            reset_driver()
 
-        else:
-            print(f"[INFO] Fuera de horario ({ahora})")
+        # reinicio preventivo
+        if contador >= 30:
+            print("[INFO] Reinicio driver")
+            reset_driver()
+            contador = 0
 
-        time.sleep(600)
-
-# ================= FLASK =================
-
-@app.route("/")
-def home():
-    return "Monitoreo activo con login automático."
+        time.sleep(540)  # 9 min
 
 # ================= MAIN =================
 
 if __name__ == "__main__":
-    if os.environ.get("WERKZEUG_RUN_MAIN") == "true":
-        threading.Thread(target=bucle, daemon=True).start()
+    threading.Thread(target=ciclo, daemon=True).start()
 
     app.run(host="0.0.0.0", port=10000)
