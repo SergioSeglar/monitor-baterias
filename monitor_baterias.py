@@ -23,12 +23,12 @@ app = Flask(__name__)
 
 @app.route("/")
 def home():
-    print("[WEB] / ping recibido")
+    print("[WEB] ping /")
     return "OK"
 
 @app.route("/health")
 def health():
-    print("[WEB] /health ping recibido")
+    print("[WEB] health check")
     return "alive"
 
 # ================= CONFIG =================
@@ -82,37 +82,31 @@ def crear_driver():
 
     driver = webdriver.Chrome(options=options)
 
-    log("Chrome driver creado correctamente")
+    log("Chrome driver listo")
     return driver
 
 # ================= LOGIN =================
 
 def login(driver):
-    try:
-        log("Entrando a login Grafana...")
-        driver.get(BASE_URL)
+    log("Login en Grafana...")
 
-        wait = WebDriverWait(driver, 15)
+    driver.get(BASE_URL)
 
-        user = wait.until(EC.presence_of_element_located((By.NAME, "user")))
-        password = driver.find_element(By.NAME, "password")
+    wait = WebDriverWait(driver, 15)
 
-        user.send_keys(GRAFANA_USER)
-        password.send_keys(GRAFANA_PASSWORD)
+    user = wait.until(EC.presence_of_element_located((By.NAME, "user")))
+    password = driver.find_element(By.NAME, "password")
 
-        driver.find_element(By.XPATH, "//button").click()
+    user.send_keys(GRAFANA_USER)
+    password.send_keys(GRAFANA_PASSWORD)
 
-        time.sleep(2)
+    driver.find_element(By.XPATH, "//button").click()
 
-        log("Login correcto")
+    time.sleep(2)
 
-    except Exception as e:
-        log("ERROR LOGIN")
-        log(str(e))
-        log(traceback.format_exc())
-        raise
+    log("Login OK")
 
-# ================= DRIVER CONTROL =================
+# ================= DRIVER =================
 
 def get_driver():
     global driver
@@ -126,7 +120,7 @@ def get_driver():
 def reset_driver():
     global driver
 
-    log("Reseteando driver...")
+    log("Reset driver...")
 
     try:
         if driver:
@@ -142,16 +136,16 @@ def obtener_datos():
     driver = get_driver()
     resultados = []
 
-    log("Iniciando scraping de baterías...")
+    log("=== INICIO SCRAPING ===")
 
     for nombre, url in baterias:
         try:
-            log(f"Accediendo a {nombre}")
+            log(f"\n📡 Accediendo: {nombre}")
 
             driver.get(url)
 
             if "login" in driver.current_url:
-                log("Sesión expirada → relogin")
+                log("⚠️ Sesión expirada → relogin")
                 reset_driver()
                 driver = get_driver()
                 driver.get(url)
@@ -160,26 +154,44 @@ def obtener_datos():
                 EC.presence_of_all_elements_located((By.CLASS_NAME, "flot-temp-elem"))
             )
 
-            log(f"{nombre} elementos detectados: {len(elements)}")
+            log(f"Elementos detectados: {len(elements)}")
 
             if len(elements) < 6:
+                log("❌ No hay suficientes datos")
                 resultados.append(("N/A", "N/A", "N/A"))
                 continue
 
-            soc = limpiar_valor(elements[0].text)
-            voltaje = elements[1].text
-            amperaje = limpiar_valor(elements[5].text)
+            # ================= LECTURAS RAW =================
 
-            log(f"{nombre} → SOC:{soc} V:{voltaje} A:{amperaje}")
+            soc_raw = elements[0].text
+            voltaje_raw = elements[1].text
+            amperaje_raw = elements[5].text
+
+            # ================= CONVERSIÓN =================
+
+            soc = limpiar_valor(soc_raw)
+            voltaje = voltaje_raw
+            amperaje = limpiar_valor(amperaje_raw)
+
+            # ================= LOG DETALLADO =================
+
+            log(f"""
+📊 {nombre}
+   SOC     → {soc_raw} → {soc}%
+   Voltaje → {voltaje_raw} → {voltaje}
+   Corriente → {amperaje_raw} → {amperaje}A
+""".strip())
 
             resultados.append((soc, voltaje, amperaje))
 
         except Exception as e:
-            log(f"ERROR en {nombre}")
+            log(f"❌ ERROR en {nombre}")
             log(str(e))
             log(traceback.format_exc())
 
             resultados.append(("N/A", "N/A", "N/A"))
+
+    log("=== FIN SCRAPING ===\n")
 
     return resultados
 
@@ -223,7 +235,7 @@ def enviar_sheets(resultados):
         log("Google Sheets actualizado")
 
     except Exception as e:
-        log("ERROR GOOGLE SHEETS")
+        log("❌ ERROR SHEETS")
         log(str(e))
         log(traceback.format_exc())
 
@@ -248,7 +260,7 @@ def ciclo():
 
         try:
             if dentro_horario():
-                log("Dentro de horario → ejecutando")
+                log("Ejecutando monitoreo...")
 
                 datos = obtener_datos()
                 enviar_sheets(datos)
@@ -257,14 +269,14 @@ def ciclo():
                 log("Fuera de horario")
 
         except Exception as e:
-            log("ERROR GLOBAL")
+            log("❌ ERROR GLOBAL")
             log(str(e))
             log(traceback.format_exc())
 
             reset_driver()
 
         if contador >= 30:
-            log("Reinicio preventivo driver")
+            log("Reinicio driver preventivo")
             reset_driver()
             contador = 0
 
