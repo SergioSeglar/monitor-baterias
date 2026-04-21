@@ -1,11 +1,6 @@
-import os
 import json
 import time
-import threading
-import traceback
 from datetime import datetime
-
-from flask import Flask
 
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -13,280 +8,152 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
-from pytz import timezone
+# =========================
+# CONFIG
+# =========================
 
-# ================= FLASK =================
+LOGIN_URL = "http://87.106.124.228:3000/login"
 
-app = Flask(__name__)
+USER = "TU_USUARIO"
+PASSWORD = "TU_PASSWORD"
 
-@app.route("/")
-def home():
-    print("[WEB] ping /")
-    return "OK"
-
-@app.route("/health")
-def health():
-    print("[WEB] health check")
-    return "alive"
-
-# ================= CONFIG =================
-
-BASE_URL = "http://87.106.124.228:3000/login"
-
-GRAFANA_USER = os.environ.get("GRAFANA_USER")
-GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
+DATA_FILE = "data.json"
 
 baterias = [
     ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
     ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
-    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?refresh=1m"),
+    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?orgId=121&refresh=1m"),
     ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
-driver = None
-contador = 0
+# =========================
+# DRIVER
+# =========================
 
-# ================= LOG =================
-
-def log(msg):
-    print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}")
-
-# ================= UTIL =================
-
-def limpiar_valor(valor):
-    try:
-        return float(
-            valor.replace('%', '')
-            .replace('V', '')
-            .replace('A', '')
-            .replace(',', '.')
-            .strip()
-        )
-    except:
-        return None
-
-# ================= DRIVER =================
-
-def crear_driver():
-    log("Creando Chrome driver...")
-
+def driver_init():
     options = Options()
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
+    return webdriver.Chrome(options=options)
 
-    driver = webdriver.Chrome(options=options)
+# =========================
+# LOG
+# =========================
 
-    log("Chrome driver listo")
-    return driver
+def log(msg):
+    print(f"[SCRAPER] {msg}")
 
-# ================= LOGIN =================
+# =========================
+# LOGIN
+# =========================
 
 def login(driver):
-    log("Login en Grafana...")
+    log("LOGIN Grafana...")
 
-    driver.get(BASE_URL)
+    driver.get(LOGIN_URL)
 
-    wait = WebDriverWait(driver, 15)
+    WebDriverWait(driver, 20).until(
+        EC.presence_of_element_located((By.NAME, "username"))
+    )
 
-    user = wait.until(EC.presence_of_element_located((By.NAME, "user")))
-    password = driver.find_element(By.NAME, "password")
+    driver.find_element(By.NAME, "username").send_keys(USER)
+    pwd = driver.find_element(By.NAME, "password")
+    pwd.send_keys(PASSWORD)
+    pwd.send_keys("\n")
 
-    user.send_keys(GRAFANA_USER)
-    password.send_keys(GRAFANA_PASSWORD)
+    WebDriverWait(driver, 20).until(
+        lambda d: "login" not in d.current_url
+    )
 
-    driver.find_element(By.XPATH, "//button").click()
+    log("LOGIN OK")
 
-    time.sleep(2)
+# =========================
+# EXTRACCIÓN REAL
+# =========================
 
-    log("Login OK")
+def extract_values(driver):
+    WebDriverWait(driver, 20).until(
+        EC.presence_of_all_elements_located((By.CSS_SELECTOR, "span.flot-temp-elem"))
+    )
 
-# ================= DRIVER =================
+    elems = driver.find_elements(By.CSS_SELECTOR, "span.flot-temp-elem")
 
-def get_driver():
-    global driver
+    values = [e.text.strip() for e in elems if e.text.strip()]
 
-    if driver is None:
-        driver = crear_driver()
+    soc = next((v for v in values if "%" in v), None)
+    volt = next((v for v in values if "V" in v), None)
+    amp = next((v for v in values if "A" in v), None)
+
+    return soc, volt, amp
+
+# =========================
+# GUARDAR JSON
+# =========================
+
+def save(data):
+    with open(DATA_FILE, "w") as f:
+        json.dump(data, f, indent=2)
+
+# =========================
+# FUNCIÓN PRINCIPAL (CRON JOB)
+# =========================
+
+def run_scraper_once():
+    log("INICIO SCRAPER")
+
+    driver = driver_init()
+
+    try:
         login(driver)
 
-    return driver
+        results = []
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-def reset_driver():
-    global driver
+        for nombre, url in baterias:
 
-    log("Reset driver...")
+            try:
+                log(f"📡 {nombre}")
 
-    try:
-        if driver:
-            driver.quit()
-    except:
-        pass
-
-    driver = None
-
-# ================= SCRAPING =================
-
-def obtener_datos():
-    driver = get_driver()
-    resultados = []
-
-    log("=== INICIO SCRAPING ===")
-
-    for nombre, url in baterias:
-        try:
-            log(f"\n📡 Accediendo: {nombre}")
-
-            driver.get(url)
-
-            if "login" in driver.current_url:
-                log("⚠️ Sesión expirada → relogin")
-                reset_driver()
-                driver = get_driver()
                 driver.get(url)
 
-            elements = WebDriverWait(driver, 15).until(
-                EC.presence_of_all_elements_located((By.CLASS_NAME, "flot-temp-elem"))
-            )
+                soc, volt, amp = extract_values(driver)
 
-            log(f"Elementos detectados: {len(elements)}")
+                log(f"{nombre} → SOC:{soc} | VOLT:{volt} | AMP:{amp}")
 
-            if len(elements) < 6:
-                log("❌ No hay suficientes datos")
-                resultados.append(("N/A", "N/A", "N/A"))
-                continue
+                results.append({
+                    "nombre": nombre,
+                    "soc": soc,
+                    "volt": volt,
+                    "amp": amp,
+                    "time": now
+                })
 
-            # ================= LECTURAS RAW =================
+            except Exception as e:
+                log(f"❌ ERROR {nombre}")
+                log(str(e))
 
-            soc_raw = elements[0].text
-            voltaje_raw = elements[1].text
-            amperaje_raw = elements[5].text
+                results.append({
+                    "nombre": nombre,
+                    "soc": None,
+                    "volt": None,
+                    "amp": None,
+                    "time": now
+                })
 
-            # ================= CONVERSIÓN =================
+        save({
+            "updated": now,
+            "data": results
+        })
 
-            soc = limpiar_valor(soc_raw)
-            voltaje = voltaje_raw
-            amperaje = limpiar_valor(amperaje_raw)
-
-            # ================= LOG DETALLADO =================
-
-            log(f"""
-📊 {nombre}
-   SOC     → {soc_raw} → {soc}%
-   Voltaje → {voltaje_raw} → {voltaje}
-   Corriente → {amperaje_raw} → {amperaje}A
-""".strip())
-
-            resultados.append((soc, voltaje, amperaje))
-
-        except Exception as e:
-            log(f"❌ ERROR en {nombre}")
-            log(str(e))
-            log(traceback.format_exc())
-
-            resultados.append(("N/A", "N/A", "N/A"))
-
-    log("=== FIN SCRAPING ===\n")
-
-    return resultados
-
-# ================= GOOGLE SHEETS =================
-
-def enviar_sheets(resultados):
-    try:
-        log("Enviando a Google Sheets...")
-
-        scope = [
-            "https://spreadsheets.google.com/feeds",
-            "https://www.googleapis.com/auth/drive"
-        ]
-
-        creds = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
-
-        client = gspread.authorize(
-            ServiceAccountCredentials.from_json_keyfile_dict(creds, scope)
-        )
-
-        sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
-        ws = sheet.worksheet("Datos")
-
-        timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
-
-        data = [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "HORA"]]
-
-        for i, (nombre, _) in enumerate(baterias):
-            soc, voltaje, amperaje = resultados[i]
-
-            data.append([
-                nombre,
-                f"{soc}%" if soc is not None else "N/A",
-                voltaje,
-                f"{amperaje}A" if amperaje is not None else "N/A",
-                timestamp
-            ])
-
-        ws.update("A1:E6", data)
-
-        log("Google Sheets actualizado")
+        log("FIN OK")
 
     except Exception as e:
-        log("❌ ERROR SHEETS")
+        log("❌ ERROR GLOBAL")
         log(str(e))
-        log(traceback.format_exc())
 
-# ================= HORARIO =================
-
-def dentro_horario():
-    ahora = datetime.now(timezone("Europe/Madrid"))
-    h = ahora.hour
-    d = ahora.weekday()
-
-    return (d in range(0, 5) and h >= 22) or (d in range(1, 6) and h < 6)
-
-# ================= LOOP =================
-
-def ciclo():
-    global contador
-
-    while True:
-        contador += 1
-
-        log(f"===== CICLO {contador} =====")
-
-        try:
-            if dentro_horario():
-                log("Ejecutando monitoreo...")
-
-                datos = obtener_datos()
-                enviar_sheets(datos)
-
-            else:
-                log("Fuera de horario")
-
-        except Exception as e:
-            log("❌ ERROR GLOBAL")
-            log(str(e))
-            log(traceback.format_exc())
-
-            reset_driver()
-
-        if contador >= 30:
-            log("Reinicio driver preventivo")
-            reset_driver()
-            contador = 0
-
-        time.sleep(540)
-
-# ================= MAIN =================
-
-if __name__ == "__main__":
-    log("SERVICIO INICIADO")
-
-    threading.Thread(target=ciclo, daemon=True).start()
-
-    app.run(host="0.0.0.0", port=10000)
+    finally:
+        driver.quit()
