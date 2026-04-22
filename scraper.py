@@ -9,54 +9,31 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
 
-
-# =========================
-# APP
-# =========================
+# -------------------------
+# FLASK
+# -------------------------
 app = Flask(__name__)
+port = int(os.environ.get("PORT", 10000))
 
-ultimos_datos = []
-ultima_actualizacion = None
+# -------------------------
+# MEMORIA GLOBAL (WEB)
+# -------------------------
+datos_globales = []
+lock = threading.Lock()
 
-
-# =========================
-# LOGIN GRAFANA
-# =========================
+# -------------------------
+# CONFIG
+# -------------------------
 BASE_URL = "http://87.106.124.228:3000/login"
 
 GRAFANA_USER = os.environ.get("GRAFANA_USER")
 GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
-
-# =========================
-# HORARIO
-# =========================
-def dentro_de_horario():
-    ahora = datetime.now(timezone("Europe/Madrid"))
-    hora = ahora.hour
-    dia = ahora.weekday()
-
-    # domingo a jueves desde 22:00
-    if dia in [6, 0, 1, 2, 3] and hora >= 22:
-        return True
-
-    # lunes a viernes hasta 06:00
-    if dia in [0, 1, 2, 3, 4] and hora < 6:
-        return True
-
-    return False
-
-
-# =========================
-# BATERÍAS
-# =========================
 baterias = [
     ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
     ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
@@ -65,50 +42,48 @@ baterias = [
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
+# -------------------------
+# HORARIO
+# -------------------------
+def dentro_de_horario():
+    ahora = datetime.now(timezone("Europe/Madrid"))
+    h = ahora.hour
+    d = ahora.weekday()
 
-# =========================
-# CHROME RENDER
-# =========================
+    return (d in range(7) and h >= 22) or (d in range(5) and h < 6)
+
+# -------------------------
+# CHROME
+# -------------------------
 def crear_driver():
     options = Options()
-
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
-
     options.binary_location = "/usr/bin/chromium"
 
-    driver = webdriver.Chrome(options=options)
-    driver.set_page_load_timeout(90)
+    return webdriver.Chrome(options=options)
 
-    return driver
-
-
-# =========================
+# -------------------------
 # LOGIN
-# =========================
+# -------------------------
 def login(driver):
     driver.get(BASE_URL)
-    wait = WebDriverWait(driver, 60)
 
-    user = wait.until(EC.presence_of_element_located((By.NAME, "username")))
-    pwd = driver.find_element(By.NAME, "password")
+    time.sleep(3)
 
-    user.send_keys(GRAFANA_USER)
-    pwd.send_keys(GRAFANA_PASSWORD)
+    driver.find_element(By.NAME, "username").send_keys(GRAFANA_USER)
+    driver.find_element(By.NAME, "password").send_keys(GRAFANA_PASSWORD)
 
     driver.find_element(By.XPATH, "//button[@type='submit']").click()
 
-    WebDriverWait(driver, 60).until(
-        lambda d: "/login" not in d.current_url
-    )
+    time.sleep(5)
 
-
-# =========================
-# SCRAPER
-# =========================
+# -------------------------
+# SCRAPER SEGURO (FIX STALE)
+# -------------------------
 def obtener_datos():
     driver = crear_driver()
     resultados = []
@@ -118,16 +93,20 @@ def obtener_datos():
 
         for nombre, url in baterias:
             driver.get(url)
-
-            WebDriverWait(driver, 90).until(
-                lambda d: d.execute_script("return document.readyState") == "complete"
-            )
-
-            time.sleep(6)
+            time.sleep(8)
 
             elements = driver.find_elements(By.CSS_SELECTOR, "span.flot-temp-elem")
 
-            valores = [e.text.strip() for e in elements if e.text.strip()]
+            valores = []
+
+            # 🔥 FIX REAL: evitar stale element
+            for e in elements:
+                try:
+                    txt = e.get_attribute("textContent").strip()
+                    if txt:
+                        valores.append(txt)
+                except:
+                    continue
 
             soc = next((v for v in valores if "%" in v), "N/A")
             volt = next((v for v in valores if "V" in v), "N/A")
@@ -142,10 +121,9 @@ def obtener_datos():
 
     return resultados
 
-
-# =========================
+# -------------------------
 # GOOGLE SHEETS
-# =========================
+# -------------------------
 def enviar_a_google_sheets(resultados):
     scope = [
         "https://spreadsheets.google.com/feeds",
@@ -164,135 +142,82 @@ def enviar_a_google_sheets(resultados):
 
     ws.update(values=[["BATERÍA","SOC","VOLTAJE","AMPERAJE","FECHA"]], range_name="A1:E1")
     ws.update(values=[[n] for n,_ in baterias], range_name="A2:A6")
-    ws.update(values=[[soc, volt, amp, ts] for soc, volt, amp in resultados], range_name="B2:E6")
+    ws.update(values=[[s,v,a,ts] for s,v,a in resultados], range_name="B2:E6")
 
-
-# =========================
-# LOOP
-# =========================
+# -------------------------
+# LOOP BACKGROUND (NO BLOQUEA FLASK)
+# -------------------------
 def loop():
-    global ultimos_datos, ultima_actualizacion
+    global datos_globales
 
     while True:
         try:
             if dentro_de_horario():
                 datos = obtener_datos()
 
-                ultimos_datos = datos
-                ultima_actualizacion = datetime.now(timezone("Europe/Madrid")).strftime("%H:%M:%S")
+                with lock:
+                    datos_globales = [
+                        {
+                            "nombre": baterias[i][0],
+                            "soc": datos[i][0],
+                            "volt": datos[i][1],
+                            "amp": datos[i][2],
+                            "hora": datetime.now().strftime("%H:%M:%S")
+                        }
+                        for i in range(len(datos))
+                    ]
 
                 enviar_a_google_sheets(datos)
 
         except Exception as e:
-            print("ERROR:", e)
+            print("ERROR LOOP:", e)
 
         time.sleep(600)
 
-
-# =========================
-# DASHBOARD WEB
-# =========================
+# -------------------------
+# PANEL WEB
+# -------------------------
 @app.route("/")
 def home():
-    global ultimos_datos, ultima_actualizacion
+    with lock:
+        data = datos_globales.copy()
 
-    html = f"""
+    html = """
     <html>
     <head>
         <meta http-equiv="refresh" content="10">
-        <title>Monitor Baterías</title>
-
         <style>
-            body {{
-                font-family: Arial;
-                background: #0f172a;
-                color: white;
-                text-align: center;
-            }}
-
-            h1 {{
-                color: #38bdf8;
-            }}
-
-            table {{
-                margin: auto;
-                width: 85%;
-                margin-top: 20px;
-                border-collapse: collapse;
-                background: #1e293b;
-            }}
-
-            th, td {{
-                padding: 12px;
-                border-bottom: 1px solid #334155;
-            }}
-
-            th {{
-                background: #0ea5e9;
-                color: black;
-            }}
-
-            .ok {{ color: #22c55e; font-weight: bold; }}
-            .warn {{ color: #f59e0b; font-weight: bold; }}
-            .bad {{ color: #ef4444; font-weight: bold; }}
+            body { font-family: Arial; background:#0f0f0f; color:white; }
+            .grid { display:flex; flex-wrap:wrap; gap:10px; }
+            .card { background:#1e1e1e; padding:15px; border-radius:10px; width:200px; }
+            h1 { color:#00ffcc; }
         </style>
     </head>
-
     <body>
-        <h1>⚡ MONITOR BATERÍAS</h1>
-        <p>Última actualización: {ultima_actualizacion}</p>
-
-        <table>
-            <tr>
-                <th>Batería</th>
-                <th>SOC</th>
-                <th>Voltaje</th>
-                <th>Amperaje</th>
-            </tr>
+        <h1>🔋 Monitor Baterías</h1>
+        <div class="grid">
     """
 
-    for i, (nombre, _) in enumerate(baterias):
-        if i < len(ultimos_datos):
-            soc, volt, amp = ultimos_datos[i]
+    for d in data:
+        html += f"""
+        <div class="card">
+            <h3>{d['nombre']}</h3>
+            <p>SOC: {d['soc']}</p>
+            <p>Volt: {d['volt']}</p>
+            <p>Amp: {d['amp']}</p>
+            <p>🕒 {d['hora']}</p>
+        </div>
+        """
 
-            try:
-                val = float(str(soc).replace("%",""))
-                cls = "ok" if val > 60 else "warn" if val > 30 else "bad"
-            except:
-                cls = "warn"
-
-            html += f"""
-            <tr>
-                <td>{nombre}</td>
-                <td class="{cls}">{soc}</td>
-                <td>{volt}</td>
-                <td>{amp}</td>
-            </tr>
-            """
-        else:
-            html += f"<tr><td>{nombre}</td><td colspan='3'>Sin datos</td></tr>"
-
-    html += "</table></body></html>"
-
+    html += "</div></body></html>"
     return html
 
-
-# =========================
-# START
-# =========================
+# -------------------------
+# STARTUP (IMPORTANTE RENDER)
+# -------------------------
 if __name__ == "__main__":
-    print("🚀 INICIANDO")
+    print("🚀 SISTEMA INICIADO")
 
-    # primera lectura
-    try:
-        if dentro_de_horario():
-            ultimos_datos = obtener_datos()
-            enviar_a_google_sheets(ultimos_datos)
-    except Exception as e:
-        print("ERROR INICIAL:", e)
+    threading.Thread(target=loop, daemon=True).start()
 
-    t = threading.Thread(target=loop, daemon=True)
-    t.start()
-
-    port = int(os.environ.get("PORT", 10000))
-app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=port)
