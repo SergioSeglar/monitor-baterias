@@ -195,9 +195,7 @@ def home():
                 text-align: center;
             }}
 
-            h1 {{
-                color: #38bdf8;
-            }}
+            h1 {{ color: #38bdf8; }}
 
             table {{
                 margin: auto;
@@ -225,7 +223,7 @@ def home():
 
     <body>
         <h1>⚡ MONITOR BATERÍAS</h1>
-        <p>Última actualización: {ultima_actualizacion}</p>
+        <p>Última actualización: {ultima_actualizacion or "Sin datos aún"}</p>
 
         <table>
             <tr>
@@ -238,7 +236,10 @@ def home():
 
     for i, (nombre, _) in enumerate(baterias):
         if i < len(ultimos_datos):
-            soc, volt, amp = ultimos_datos[i]
+            try:
+                soc, volt, amp = ultimos_datos[i]
+            except:
+                soc, volt, amp = "N/A", "N/A", "N/A"
 
             try:
                 val = float(str(soc).replace("%",""))
