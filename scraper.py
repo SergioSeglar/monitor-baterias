@@ -198,5 +198,23 @@ def home():
 
 
 if __name__ == "__main__":
-    threading.Thread(target=loop).start()
+    print("🚀 INICIANDO SISTEMA")
+
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+
     app.run(host="0.0.0.0", port=10000)
+def loop():
+    while True:
+        try:
+            print("\n🚀 CICLO INICIADO")
+            datos = obtener_datos()
+            print("📊 datos:", datos)
+
+            enviar_a_google_sheets(datos)
+            print("📤 enviado a sheets")
+
+        except Exception as e:
+            print("❌ ERROR LOOP:", e)
+
+        time.sleep(600)    
