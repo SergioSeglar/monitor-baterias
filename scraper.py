@@ -5,6 +5,7 @@ import threading
 from datetime import datetime
 
 from flask import Flask
+
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
@@ -19,147 +20,183 @@ app = Flask(__name__)
 
 BASE_URL = "http://87.106.124.228:3000/login"
 
-USERNAME = os.environ.get("GRAFANA_USER")
-PASSWORD = os.environ.get("GRAFANA_PASSWORD")
+GRAFANA_USER = os.environ.get("GRAFANA_USER")
+GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
 baterias = [
-    ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
-    ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
-    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?refresh=1m"),
-    ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
-    ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
+    ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/..."),
+    ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/..."),
+    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/..."),
+    ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/..."),
+    ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/..."),
 ]
 
+# -------------------------
+# CHROME RENDER
+# -------------------------
 def crear_driver():
     options = Options()
+
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
+
     options.binary_location = "/usr/bin/chromium"
 
     return webdriver.Chrome(options=options)
 
-def limpiar_valor(valor):
-    return float(valor.replace('%', '').replace('V', '').replace('A', '').replace(',', '.').strip())
 
+# -------------------------
+# LOGIN
+# -------------------------
 def login(driver):
-    print("🔐 Haciendo login...")
+    print("🔐 Login...")
 
     driver.get(BASE_URL)
+    wait = WebDriverWait(driver, 60)
 
-    WebDriverWait(driver, 20).until(
-        EC.presence_of_element_located((By.NAME, "username"))
-    )
+    user = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+    pwd = driver.find_element(By.NAME, "password")
 
-    driver.find_element(By.NAME, "username").send_keys(USERNAME)
-    driver.find_element(By.NAME, "password").send_keys(PASSWORD)
+    user.clear()
+    user.send_keys(GRAFANA_USER)
 
-    driver.find_element(By.XPATH, "//button").click()
+    pwd.clear()
+    pwd.send_keys(GRAFANA_PASSWORD)
 
-    # esperar a salir del login
-    WebDriverWait(driver, 20).until(
+    btn = driver.find_element(By.XPATH, "//button[@type='submit']")
+    driver.execute_script("arguments[0].click();", btn)
+
+    WebDriverWait(driver, 60).until(
         lambda d: "/login" not in d.current_url
     )
 
-    print("✅ Login correcto")
+    print("✅ Login OK")
 
+
+# -------------------------
+# ESPERA DATOS
+# -------------------------
 def esperar_datos(driver):
     try:
-        WebDriverWait(driver, 30).until(
-            lambda d: len(d.find_elements(By.CLASS_NAME, "flot-temp-elem")) >= 3
+        WebDriverWait(driver, 60).until(
+            lambda d: len(d.find_elements(By.CLASS_NAME, "flot-temp-elem")) > 0
         )
         return True
     except:
         return False
 
+
+# -------------------------
+# SCRAPING
+# -------------------------
 def obtener_datos():
     driver = crear_driver()
 
-    login(driver)
-
     resultados = []
 
-    for nombre, url in baterias:
-        print(f"\n📡 {nombre}")
-        driver.get(url)
+    try:
+        login(driver)
 
-        if not esperar_datos(driver):
-            print("⚠️ Reintentando carga...")
-            driver.refresh()
-            time.sleep(5)
+        for nombre, url in baterias:
+            print(f"\n📡 {nombre}")
+            driver.get(url)
 
-        elements = driver.find_elements(By.CLASS_NAME, "flot-temp-elem")
+            if not esperar_datos(driver):
+                print("⚠️ Reintentando...")
+                time.sleep(5)
+                driver.refresh()
 
-        try:
-            if len(elements) >= 6:
+            elements = driver.find_elements(By.CLASS_NAME, "flot-temp-elem")
+
+            print(f"🔎 elementos: {len(elements)}")
+
+            try:
                 textos = [e.text for e in elements]
 
-                soc = limpiar_valor(textos[0])
-                voltaje = textos[1]
-                amperaje = limpiar_valor(textos[5])
+                if len(textos) >= 6:
+                    soc = float(textos[0].replace('%',''))
+                    volt = textos[1]
+                    amp = float(textos[5].replace('A',''))
 
-                print(f"✅ SOC: {soc}% | VOLT: {voltaje} | AMP: {amperaje}")
-                resultados.append((soc, voltaje, amperaje))
-            else:
-                raise Exception("Datos insuficientes")
+                    print(f"SOC {soc} | VOLT {volt} | AMP {amp}")
 
-        except Exception as e:
-            print(f"❌ Error: {e}")
-            resultados.append(("N/A", "N/A", "N/A"))
+                    resultados.append((soc, volt, amp))
+                else:
+                    resultados.append(("N/A","N/A","N/A"))
 
-        time.sleep(2)
+            except Exception as e:
+                print("❌ error:", e)
+                resultados.append(("N/A","N/A","N/A"))
 
-    driver.quit()
+            time.sleep(3)
+
+    finally:
+        driver.quit()
+
     return resultados
 
+
+# -------------------------
+# GOOGLE SHEETS (FIXED)
+# -------------------------
 def enviar_a_google_sheets(resultados):
     scope = [
         "https://spreadsheets.google.com/feeds",
-        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/drive"
     ]
 
     creds_dict = json.loads(os.environ["GOOGLE_CREDENTIALS_JSON"])
     creds = ServiceAccountCredentials.from_json_keyfile_dict(creds_dict, scope)
+
     client = gspread.authorize(creds)
 
     sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
     ws = sheet.worksheet("Datos")
 
-    ws.update("A1:E1", [["BATERÍA", "SOC (%)", "VOLTAJE", "AMPERAJE", "ÚLTIMA ACTUALIZACIÓN"]])
-    ws.update("A2:A6", [[nombre] for nombre, _ in baterias])
+    # HEADER (FIXED)
+    ws.update(
+        values=[["BATERÍA","SOC (%)","VOLTAJE","AMPERAJE","FECHA"]],
+        range_name="A1:E1"
+    )
+
+    ws.update(
+        values=[[nombre] for nombre,_ in baterias],
+        range_name="A2:A6"
+    )
 
     timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
 
-    valores = [[f"{soc}%", voltaje, f"{amp}A", timestamp] for soc, voltaje, amp in resultados]
+    valores = [[f"{soc}%", volt, f"{amp}A", timestamp] for soc, volt, amp in resultados]
 
-    ws.update("B2:E6", valores)
+    ws.update(
+        values=valores,
+        range_name="B2:E6"
+    )
 
-def bucle():
+
+# -------------------------
+# LOOP
+# -------------------------
+def loop():
     while True:
-        ahora = datetime.now(timezone("Europe/Madrid"))
-        hora = ahora.hour
-        dia = ahora.weekday()
-
-        ejecutar = (
-            (dia in range(0, 5) and hora >= 22) or
-            (dia in range(1, 6) and hora < 6)
-        )
-
-        if ejecutar:
-            print(f"\n⏱ Ejecutando... {ahora.strftime('%H:%M:%S')}")
-            datos = obtener_datos()
-            enviar_a_google_sheets(datos)
-        else:
-            print(f"😴 Fuera de horario {ahora.strftime('%H:%M:%S')}")
-
+        print("\n🚀 CICLO")
+        datos = obtener_datos()
+        enviar_a_google_sheets(datos)
+        print("💤 esperando 10 min")
         time.sleep(600)
 
+
+# -------------------------
+# FLASK
+# -------------------------
 @app.route("/")
 def home():
-    return "OK - Monitor activo"
+    return "OK monitor activo"
+
 
 if __name__ == "__main__":
-    threading.Thread(target=bucle).start()
+    threading.Thread(target=loop).start()
     app.run(host="0.0.0.0", port=10000)
