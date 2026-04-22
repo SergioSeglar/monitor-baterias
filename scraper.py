@@ -23,16 +23,20 @@ BASE_URL = "http://87.106.124.228:3000/login"
 GRAFANA_USER = os.environ.get("GRAFANA_USER")
 GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
+# -------------------------
+# BATERÍAS (URLS COMPLETAS)
+# -------------------------
 baterias = [
     ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
     ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
-    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?refresh=1m"),
+    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?orgId=121&refresh=1m"),
     ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
+
 # -------------------------
-# CHROME RENDER
+# CHROME (RENDER FIX)
 # -------------------------
 def crear_driver():
     options = Options()
@@ -45,14 +49,17 @@ def crear_driver():
 
     options.binary_location = "/usr/bin/chromium"
 
-    return webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(90)
+
+    return driver
 
 
 # -------------------------
-# LOGIN
+# LOGIN GRAFANA
 # -------------------------
 def login(driver):
-    print("🔐 Login...")
+    print("🔐 LOGIN...")
 
     driver.get(BASE_URL)
     wait = WebDriverWait(driver, 60)
@@ -60,41 +67,33 @@ def login(driver):
     user = wait.until(EC.presence_of_element_located((By.NAME, "username")))
     pwd = driver.find_element(By.NAME, "password")
 
-    user.clear()
     user.send_keys(GRAFANA_USER)
-
-    pwd.clear()
     pwd.send_keys(GRAFANA_PASSWORD)
 
-    btn = driver.find_element(By.XPATH, "//button[@type='submit']")
-    driver.execute_script("arguments[0].click();", btn)
+    driver.find_element(By.XPATH, "//button[@type='submit']").click()
 
     WebDriverWait(driver, 60).until(
         lambda d: "/login" not in d.current_url
     )
 
-    print("✅ Login OK")
+    print("✅ LOGIN OK")
 
 
 # -------------------------
-# ESPERA DATOS
+# ESPERA DASHBOARD REAL
 # -------------------------
-def esperar_datos(driver):
-    try:
-        WebDriverWait(driver, 60).until(
-            lambda d: len(d.find_elements(By.CLASS_NAME, "flot-temp-elem")) > 0
-        )
-        return True
-    except:
-        return False
+def esperar_dashboard(driver):
+    WebDriverWait(driver, 90).until(
+        lambda d: d.execute_script("return document.readyState") == "complete"
+    )
+    time.sleep(7)  # render real Grafana
 
 
 # -------------------------
-# SCRAPING
+# SCRAPER
 # -------------------------
 def obtener_datos():
     driver = crear_driver()
-
     resultados = []
 
     try:
@@ -102,34 +101,30 @@ def obtener_datos():
 
         for nombre, url in baterias:
             print(f"\n📡 {nombre}")
+
             driver.get(url)
+            esperar_dashboard(driver)
 
-            if not esperar_datos(driver):
-                print("⚠️ Reintentando...")
-                time.sleep(5)
-                driver.refresh()
+            elements = driver.find_elements(
+                By.CSS_SELECTOR,
+                "span.flot-temp-elem"
+            )
 
-            elements = driver.find_elements(By.CLASS_NAME, "flot-temp-elem")
+            valores = [
+                e.text.strip()
+                for e in elements
+                if e.is_displayed() and e.text.strip()
+            ]
 
-            print(f"🔎 elementos: {len(elements)}")
+            print("RAW:", valores)
 
-            try:
-                textos = [e.text for e in elements]
+            soc = next((v for v in valores if "%" in v), "N/A")
+            volt = next((v for v in valores if "V" in v), "N/A")
+            amp = next((v for v in valores if "A" in v), "N/A")
 
-                if len(textos) >= 6:
-                    soc = float(textos[0].replace('%',''))
-                    volt = textos[1]
-                    amp = float(textos[5].replace('A',''))
+            print(f"OK → {soc} | {volt} | {amp}")
 
-                    print(f"SOC {soc} | VOLT {volt} | AMP {amp}")
-
-                    resultados.append((soc, volt, amp))
-                else:
-                    resultados.append(("N/A","N/A","N/A"))
-
-            except Exception as e:
-                print("❌ error:", e)
-                resultados.append(("N/A","N/A","N/A"))
+            resultados.append((soc, volt, amp))
 
             time.sleep(3)
 
@@ -140,7 +135,7 @@ def obtener_datos():
 
 
 # -------------------------
-# GOOGLE SHEETS (FIXED)
+# GOOGLE SHEETS
 # -------------------------
 def enviar_a_google_sheets(resultados):
     scope = [
@@ -156,20 +151,19 @@ def enviar_a_google_sheets(resultados):
     sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
     ws = sheet.worksheet("Datos")
 
-    # HEADER (FIXED)
     ws.update(
-        values=[["BATERÍA","SOC (%)","VOLTAJE","AMPERAJE","FECHA"]],
+        values=[["BATERÍA","SOC","VOLTAJE","AMPERAJE","FECHA"]],
         range_name="A1:E1"
     )
 
     ws.update(
-        values=[[nombre] for nombre,_ in baterias],
+        values=[[n] for n,_ in baterias],
         range_name="A2:A6"
     )
 
-    timestamp = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
+    ts = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
 
-    valores = [[f"{soc}%", volt, f"{amp}A", timestamp] for soc, volt, amp in resultados]
+    valores = [[soc, volt, amp, ts] for soc, volt, amp in resultados]
 
     ws.update(
         values=valores,
@@ -182,10 +176,17 @@ def enviar_a_google_sheets(resultados):
 # -------------------------
 def loop():
     while True:
-        print("\n🚀 CICLO")
-        datos = obtener_datos()
-        enviar_a_google_sheets(datos)
-        print("💤 esperando 10 min")
+        try:
+            print("\n🚀 CICLO")
+            datos = obtener_datos()
+            print("📊 RESULTADO:", datos)
+
+            enviar_a_google_sheets(datos)
+            print("📤 ENVIADO OK")
+
+        except Exception as e:
+            print("❌ ERROR LOOP:", e)
+
         time.sleep(600)
 
 
@@ -197,24 +198,23 @@ def home():
     return "OK monitor activo"
 
 
+# -------------------------
+# STARTUP (FIX PRINCIPAL)
+# -------------------------
 if __name__ == "__main__":
     print("🚀 INICIANDO SISTEMA")
 
+    # 🔥 PRIMERA LECTURA INMEDIATA
+    try:
+        datos = obtener_datos()
+        print("📊 PRIMERA LECTURA:", datos)
+        enviar_a_google_sheets(datos)
+        print("📤 PRIMERA SUBIDA OK")
+    except Exception as e:
+        print("❌ ERROR INICIAL:", e)
+
+    # 🔁 LOOP EN BACKGROUND
     t = threading.Thread(target=loop, daemon=True)
     t.start()
 
     app.run(host="0.0.0.0", port=10000)
-def loop():
-    while True:
-        try:
-            print("\n🚀 CICLO INICIADO")
-            datos = obtener_datos()
-            print("📊 datos:", datos)
-
-            enviar_a_google_sheets(datos)
-            print("📤 enviado a sheets")
-
-        except Exception as e:
-            print("❌ ERROR LOOP:", e)
-
-        time.sleep(600)    
