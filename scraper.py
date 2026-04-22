@@ -179,39 +179,87 @@ def loop():
 # -------------------------
 @app.route("/")
 def home():
-    with lock:
-        data = datos_globales.copy()
+    global ultimos_datos, ultima_actualizacion
 
-    html = """
+    html = f"""
     <html>
     <head>
         <meta http-equiv="refresh" content="10">
+        <title>Monitor Baterías</title>
+
         <style>
-            body { font-family: Arial; background:#0f0f0f; color:white; }
-            .grid { display:flex; flex-wrap:wrap; gap:10px; }
-            .card { background:#1e1e1e; padding:15px; border-radius:10px; width:200px; }
-            h1 { color:#00ffcc; }
+            body {{
+                font-family: Arial;
+                background: #0f172a;
+                color: white;
+                text-align: center;
+            }}
+
+            h1 {{
+                color: #38bdf8;
+            }}
+
+            table {{
+                margin: auto;
+                width: 85%;
+                margin-top: 20px;
+                border-collapse: collapse;
+                background: #1e293b;
+            }}
+
+            th, td {{
+                padding: 12px;
+                border-bottom: 1px solid #334155;
+            }}
+
+            th {{
+                background: #0ea5e9;
+                color: black;
+            }}
+
+            .ok {{ color: #22c55e; font-weight: bold; }}
+            .warn {{ color: #f59e0b; font-weight: bold; }}
+            .bad {{ color: #ef4444; font-weight: bold; }}
         </style>
     </head>
+
     <body>
-        <h1>🔋 Monitor Baterías</h1>
-        <div class="grid">
+        <h1>⚡ MONITOR BATERÍAS</h1>
+        <p>Última actualización: {ultima_actualizacion}</p>
+
+        <table>
+            <tr>
+                <th>Batería</th>
+                <th>SOC</th>
+                <th>Voltaje</th>
+                <th>Amperaje</th>
+            </tr>
     """
 
-    for d in data:
-        html += f"""
-        <div class="card">
-            <h3>{d['nombre']}</h3>
-            <p>SOC: {d['soc']}</p>
-            <p>Volt: {d['volt']}</p>
-            <p>Amp: {d['amp']}</p>
-            <p>🕒 {d['hora']}</p>
-        </div>
-        """
+    for i, (nombre, _) in enumerate(baterias):
+        if i < len(ultimos_datos):
+            soc, volt, amp = ultimos_datos[i]
 
-    html += "</div></body></html>"
+            try:
+                val = float(str(soc).replace("%",""))
+                cls = "ok" if val > 60 else "warn" if val > 30 else "bad"
+            except:
+                cls = "warn"
+
+            html += f"""
+            <tr>
+                <td>{nombre}</td>
+                <td class="{cls}">{soc}</td>
+                <td>{volt}</td>
+                <td>{amp}</td>
+            </tr>
+            """
+        else:
+            html += f"<tr><td>{nombre}</td><td colspan='3'>Sin datos</td></tr>"
+
+    html += "</table></body></html>"
+
     return html
-
 # -------------------------
 # STARTUP (IMPORTANTE RENDER)
 # -------------------------
