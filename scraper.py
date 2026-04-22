@@ -24,11 +24,11 @@ GRAFANA_USER = os.environ.get("GRAFANA_USER")
 GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
 baterias = [
-    ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/..."),
-    ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/..."),
-    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/..."),
-    ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/..."),
-    ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/..."),
+    ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
+    ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
+    ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?refresh=1m"),
+    ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
+    ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
 # -------------------------
