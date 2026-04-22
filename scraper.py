@@ -24,6 +24,26 @@ GRAFANA_USER = os.environ.get("GRAFANA_USER")
 GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
 # -------------------------
+# HORARIO DE FUNCIONAMIENTO
+# -------------------------
+def dentro_de_horario():
+    ahora = datetime.now(timezone("Europe/Madrid"))
+
+    hora = ahora.hour
+    dia = ahora.weekday()  # 0=lunes ... 6=domingo
+
+    # 🌙 domingo a jueves desde 22:00
+    if dia in [6, 0, 1, 2, 3] and hora >= 22:
+        return True
+
+    # 🌅 lunes a viernes hasta 06:00
+    if dia in [0, 1, 2, 3, 4] and hora < 6:
+        return True
+
+    return False
+
+
+# -------------------------
 # BATERÍAS (URLS COMPLETAS)
 # -------------------------
 baterias = [
@@ -86,7 +106,7 @@ def esperar_dashboard(driver):
     WebDriverWait(driver, 90).until(
         lambda d: d.execute_script("return document.readyState") == "complete"
     )
-    time.sleep(7)  # render real Grafana
+    time.sleep(7)
 
 
 # -------------------------
@@ -122,9 +142,9 @@ def obtener_datos():
             volt = next((v for v in valores if "V" in v), "N/A")
             amp = next((v for v in valores if "A" in v), "N/A")
 
-            print(f"OK → {soc} | {volt} | {amp}")
-
             resultados.append((soc, volt, amp))
+
+            print(f"OK → {soc} | {volt} | {amp}")
 
             time.sleep(3)
 
@@ -151,38 +171,28 @@ def enviar_a_google_sheets(resultados):
     sheet = client.open_by_key("1qe6aOpnrxwFDLoqwPJfcnzJRM4psbDrHG-h7fZk8RhA")
     ws = sheet.worksheet("Datos")
 
-    ws.update(
-        values=[["BATERÍA","SOC","VOLTAJE","AMPERAJE","FECHA"]],
-        range_name="A1:E1"
-    )
-
-    ws.update(
-        values=[[n] for n,_ in baterias],
-        range_name="A2:A6"
-    )
-
     ts = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
 
-    valores = [[soc, volt, amp, ts] for soc, volt, amp in resultados]
-
-    ws.update(
-        values=valores,
-        range_name="B2:E6"
-    )
+    ws.update(values=[["BATERÍA","SOC","VOLTAJE","AMPERAJE","FECHA"]], range_name="A1:E1")
+    ws.update(values=[[n] for n,_ in baterias], range_name="A2:A6")
+    ws.update(values=[[soc, volt, amp, ts] for soc, volt, amp in resultados], range_name="B2:E6")
 
 
 # -------------------------
-# LOOP
+# LOOP CON HORARIO
 # -------------------------
 def loop():
     while True:
         try:
-            print("\n🚀 CICLO")
-            datos = obtener_datos()
-            print("📊 RESULTADO:", datos)
+            if dentro_de_horario():
+                print("\n🚀 CICLO (EN HORARIO)")
+                datos = obtener_datos()
+                print("📊 RESULTADO:", datos)
 
-            enviar_a_google_sheets(datos)
-            print("📤 ENVIADO OK")
+                enviar_a_google_sheets(datos)
+                print("📤 ENVIADO OK")
+            else:
+                print("⏱️ Fuera de horario")
 
         except Exception as e:
             print("❌ ERROR LOOP:", e)
@@ -199,21 +209,23 @@ def home():
 
 
 # -------------------------
-# STARTUP (FIX PRINCIPAL)
+# STARTUP
 # -------------------------
 if __name__ == "__main__":
     print("🚀 INICIANDO SISTEMA")
 
-    # 🔥 PRIMERA LECTURA INMEDIATA
+    # 🔥 primera ejecución solo si toca horario
     try:
-        datos = obtener_datos()
-        print("📊 PRIMERA LECTURA:", datos)
-        enviar_a_google_sheets(datos)
-        print("📤 PRIMERA SUBIDA OK")
+        if dentro_de_horario():
+            datos = obtener_datos()
+            print("📊 PRIMERA LECTURA:", datos)
+            enviar_a_google_sheets(datos)
+            print("📤 PRIMERA SUBIDA OK")
+        else:
+            print("⏱️ Inicio fuera de horario")
     except Exception as e:
         print("❌ ERROR INICIAL:", e)
 
-    # 🔁 LOOP EN BACKGROUND
     t = threading.Thread(target=loop, daemon=True)
     t.start()
 
