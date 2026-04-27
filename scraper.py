@@ -9,31 +9,43 @@ from flask import Flask
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
 
 import gspread
 from oauth2client.service_account import ServiceAccountCredentials
 from pytz import timezone
 
-# -------------------------
-# FLASK
-# -------------------------
 app = Flask(__name__)
-port = int(os.environ.get("PORT", 10000))
 
-# -------------------------
-# MEMORIA GLOBAL (WEB)
-# -------------------------
-datos_globales = []
-lock = threading.Lock()
-
-# -------------------------
-# CONFIG
-# -------------------------
 BASE_URL = "http://87.106.124.228:3000/login"
 
 GRAFANA_USER = os.environ.get("GRAFANA_USER")
 GRAFANA_PASSWORD = os.environ.get("GRAFANA_PASSWORD")
 
+# -------------------------
+# HORARIO DE FUNCIONAMIENTO
+# -------------------------
+def dentro_de_horario():
+    ahora = datetime.now(timezone("Europe/Madrid"))
+
+    hora = ahora.hour
+    dia = ahora.weekday()  # 0=lunes ... 6=domingo
+
+    # 🌙 domingo a jueves desde 22:00
+    if dia in [6, 0, 1, 2, 3] and hora >= 22:
+        return True
+
+    # 🌅 lunes a viernes hasta 06:00
+    if dia in [0, 1, 2, 3, 4] and hora < 6:
+        return True
+
+    return False
+
+
+# -------------------------
+# BATERÍAS (URLS COMPLETAS)
+# -------------------------
 baterias = [
     ("BATERÍA 10", "http://87.106.124.228:3000/d/U_0RUIJnz/lgv-10-em0522000366001-48v-gprs_s_439?orgId=121&refresh=1m"),
     ("BATERÍA 9", "http://87.106.124.228:3000/d/hssJ_tY4k/lgv-9-em1423001154001-48v-315ah-gprs_s_23205?orgId=121&refresh=1m"),
@@ -42,47 +54,63 @@ baterias = [
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
 ]
 
-# -------------------------
-# HORARIO
-# -------------------------
-def dentro_de_horario():
-    ahora = datetime.now(timezone("Europe/Madrid"))
-    h = ahora.hour
-    d = ahora.weekday()
-
-    return (d in range(7) and h >= 22) or (d in range(5) and h < 6)
 
 # -------------------------
-# CHROME
+# CHROME (RENDER FIX)
 # -------------------------
 def crear_driver():
     options = Options()
+
     options.add_argument("--headless=new")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
     options.add_argument("--window-size=1920,1080")
+
     options.binary_location = "/usr/bin/chromium"
 
-    return webdriver.Chrome(options=options)
+    driver = webdriver.Chrome(options=options)
+    driver.set_page_load_timeout(90)
+
+    return driver
+
 
 # -------------------------
-# LOGIN
+# LOGIN GRAFANA
 # -------------------------
 def login(driver):
+    print("🔐 LOGIN...")
+
     driver.get(BASE_URL)
+    wait = WebDriverWait(driver, 60)
 
-    time.sleep(3)
+    user = wait.until(EC.presence_of_element_located((By.NAME, "username")))
+    pwd = driver.find_element(By.NAME, "password")
 
-    driver.find_element(By.NAME, "username").send_keys(GRAFANA_USER)
-    driver.find_element(By.NAME, "password").send_keys(GRAFANA_PASSWORD)
+    user.send_keys(GRAFANA_USER)
+    pwd.send_keys(GRAFANA_PASSWORD)
 
     driver.find_element(By.XPATH, "//button[@type='submit']").click()
 
-    time.sleep(5)
+    WebDriverWait(driver, 60).until(
+        lambda d: "/login" not in d.current_url
+    )
+
+    print("✅ LOGIN OK")
+
 
 # -------------------------
-# SCRAPER SEGURO (FIX STALE)
+# ESPERA DASHBOARD REAL
+# -------------------------
+def esperar_dashboard(driver):
+    WebDriverWait(driver, 90).until(
+        lambda d: d.execute_script("return document.readyState") == "complete"
+    )
+    time.sleep(7)
+
+
+# -------------------------
+# SCRAPER
 # -------------------------
 def obtener_datos():
     driver = crear_driver()
@@ -92,21 +120,23 @@ def obtener_datos():
         login(driver)
 
         for nombre, url in baterias:
+            print(f"\n📡 {nombre}")
+
             driver.get(url)
-            time.sleep(8)
+            esperar_dashboard(driver)
 
-            elements = driver.find_elements(By.CSS_SELECTOR, "span.flot-temp-elem")
+            elements = driver.find_elements(
+                By.CSS_SELECTOR,
+                "span.flot-temp-elem"
+            )
 
-            valores = []
+            valores = [
+                e.text.strip()
+                for e in elements
+                if e.is_displayed() and e.text.strip()
+            ]
 
-            # 🔥 FIX REAL: evitar stale element
-            for e in elements:
-                try:
-                    txt = e.get_attribute("textContent").strip()
-                    if txt:
-                        valores.append(txt)
-                except:
-                    continue
+            print("RAW:", valores)
 
             soc = next((v for v in valores if "%" in v), "N/A")
             volt = next((v for v in valores if "V" in v), "N/A")
@@ -114,12 +144,15 @@ def obtener_datos():
 
             resultados.append((soc, volt, amp))
 
-            time.sleep(2)
+            print(f"OK → {soc} | {volt} | {amp}")
+
+            time.sleep(3)
 
     finally:
         driver.quit()
 
     return resultados
+
 
 # -------------------------
 # GOOGLE SHEETS
@@ -142,131 +175,58 @@ def enviar_a_google_sheets(resultados):
 
     ws.update(values=[["BATERÍA","SOC","VOLTAJE","AMPERAJE","FECHA"]], range_name="A1:E1")
     ws.update(values=[[n] for n,_ in baterias], range_name="A2:A6")
-    ws.update(values=[[s,v,a,ts] for s,v,a in resultados], range_name="B2:E6")
+    ws.update(values=[[soc, volt, amp, ts] for soc, volt, amp in resultados], range_name="B2:E6")
+
 
 # -------------------------
-# LOOP BACKGROUND (NO BLOQUEA FLASK)
+# LOOP CON HORARIO
 # -------------------------
 def loop():
-    global datos_globales
-
     while True:
         try:
             if dentro_de_horario():
+                print("\n🚀 CICLO (EN HORARIO)")
                 datos = obtener_datos()
-
-                with lock:
-                    datos_globales = [
-                        {
-                            "nombre": baterias[i][0],
-                            "soc": datos[i][0],
-                            "volt": datos[i][1],
-                            "amp": datos[i][2],
-                            "hora": datetime.now().strftime("%H:%M:%S")
-                        }
-                        for i in range(len(datos))
-                    ]
+                print("📊 RESULTADO:", datos)
 
                 enviar_a_google_sheets(datos)
+                print("📤 ENVIADO OK")
+            else:
+                print("⏱️ Fuera de horario")
 
         except Exception as e:
-            print("ERROR LOOP:", e)
+            print("❌ ERROR LOOP:", e)
 
         time.sleep(600)
 
+
 # -------------------------
-# PANEL WEB
+# FLASK
 # -------------------------
 @app.route("/")
 def home():
-    global ultimos_datos, ultima_actualizacion
+    return "OK monitor activo"
 
-    html = f"""
-    <html>
-    <head>
-        <meta http-equiv="refresh" content="10">
-        <title>Monitor Baterías</title>
 
-        <style>
-            body {{
-                font-family: Arial;
-                background: #0f172a;
-                color: white;
-                text-align: center;
-            }}
-
-            h1 {{ color: #38bdf8; }}
-
-            table {{
-                margin: auto;
-                width: 85%;
-                margin-top: 20px;
-                border-collapse: collapse;
-                background: #1e293b;
-            }}
-
-            th, td {{
-                padding: 12px;
-                border-bottom: 1px solid #334155;
-            }}
-
-            th {{
-                background: #0ea5e9;
-                color: black;
-            }}
-
-            .ok {{ color: #22c55e; font-weight: bold; }}
-            .warn {{ color: #f59e0b; font-weight: bold; }}
-            .bad {{ color: #ef4444; font-weight: bold; }}
-        </style>
-    </head>
-
-    <body>
-        <h1>⚡ MONITOR BATERÍAS</h1>
-        <p>Última actualización: {ultima_actualizacion or "Sin datos aún"}</p>
-
-        <table>
-            <tr>
-                <th>Batería</th>
-                <th>SOC</th>
-                <th>Voltaje</th>
-                <th>Amperaje</th>
-            </tr>
-    """
-
-    for i, (nombre, _) in enumerate(baterias):
-        if i < len(ultimos_datos):
-            try:
-                soc, volt, amp = ultimos_datos[i]
-            except:
-                soc, volt, amp = "N/A", "N/A", "N/A"
-
-            try:
-                val = float(str(soc).replace("%",""))
-                cls = "ok" if val > 60 else "warn" if val > 30 else "bad"
-            except:
-                cls = "warn"
-
-            html += f"""
-            <tr>
-                <td>{nombre}</td>
-                <td class="{cls}">{soc}</td>
-                <td>{volt}</td>
-                <td>{amp}</td>
-            </tr>
-            """
-        else:
-            html += f"<tr><td>{nombre}</td><td colspan='3'>Sin datos</td></tr>"
-
-    html += "</table></body></html>"
-
-    return html
 # -------------------------
-# STARTUP (IMPORTANTE RENDER)
+# STARTUP
 # -------------------------
 if __name__ == "__main__":
-    print("🚀 SISTEMA INICIADO")
+    print("🚀 INICIANDO SISTEMA")
 
-    threading.Thread(target=loop, daemon=True).start()
+    # 🔥 primera ejecución solo si toca horario
+    try:
+        if dentro_de_horario():
+            datos = obtener_datos()
+            print("📊 PRIMERA LECTURA:", datos)
+            enviar_a_google_sheets(datos)
+            print("📤 PRIMERA SUBIDA OK")
+        else:
+            print("⏱️ Inicio fuera de horario")
+    except Exception as e:
+        print("❌ ERROR INICIAL:", e)
 
-    app.run(host="0.0.0.0", port=port)
+    t = threading.Thread(target=loop, daemon=True)
+    t.start()
+
+    app.run(host="0.0.0.0", port=10000)
