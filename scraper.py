@@ -182,22 +182,21 @@ def enviar_a_google_sheets(resultados):
 # LOOP CON HORARIO
 # -------------------------
 def loop():
-    while True:
-        try:
-            if dentro_de_horario():
-                print("\n🚀 CICLO (EN HORARIO)")
-                datos = obtener_datos()
-                print("📊 RESULTADO:", datos)
+    print("🚀 WORKER INICIADO")
 
-                enviar_a_google_sheets(datos)
-                print("📤 ENVIADO OK")
-            else:
-                print("⏱️ Fuera de horario")
+while True:
+    try:
+        if dentro_de_horario():
+            print("📡 Ejecutando ciclo")
+            datos = obtener_datos()
+            enviar_a_google_sheets(datos)
+        else:
+            print("⏱️ Fuera de horario")
 
-        except Exception as e:
-            print("❌ ERROR LOOP:", e)
+    except Exception as e:
+        print("❌ ERROR:", e)
 
-        time.sleep(600)
+    time.sleep(600)
 
 
 # -------------------------
