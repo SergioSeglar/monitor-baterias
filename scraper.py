@@ -52,6 +52,7 @@ baterias = [
     ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?orgId=121&refresh=1m"),
     ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
+    (http://87.106.124.228:3000/d/VXjh1AADz/lgv-1-em1926001340001-48v-315ah-disp-tfts-3557-gprs_w_4g_25678?orgId=121&refresh=5s),
 ]
 
 
@@ -174,29 +175,30 @@ def enviar_a_google_sheets(resultados):
     ts = datetime.now(timezone("Europe/Madrid")).strftime("%Y-%m-%d %H:%M:%S")
 
     ws.update(values=[["BATERÍA","SOC","VOLTAJE","AMPERAJE","FECHA"]], range_name="A1:E1")
-    ws.update(values=[[n] for n,_ in baterias], range_name="A2:A6")
-    ws.update(values=[[soc, volt, amp, ts] for soc, volt, amp in resultados], range_name="B2:E6")
+    ws.update(values=[[n] for n,_ in baterias], range_name="A2:A7")
+    ws.update(values=[[soc, volt, amp, ts] for soc, volt, amp in resultados], range_name="B2:E7")
 
 
 # -------------------------
 # LOOP CON HORARIO
 # -------------------------
 def loop():
-    print("🚀 WORKER INICIADO")
+    while True:
+        try:
+            if dentro_de_horario():
+                print("\n🚀 CICLO (EN HORARIO)")
+                datos = obtener_datos()
+                print("📊 RESULTADO:", datos)
 
-while True:
-    try:
-        if dentro_de_horario():
-            print("📡 Ejecutando ciclo")
-            datos = obtener_datos()
-            enviar_a_google_sheets(datos)
-        else:
-            print("⏱️ Fuera de horario")
+                enviar_a_google_sheets(datos)
+                print("📤 ENVIADO OK")
+            else:
+                print("⏱️ Fuera de horario")
 
-    except Exception as e:
-        print("❌ ERROR:", e)
+        except Exception as e:
+            print("❌ ERROR LOOP:", e)
 
-    time.sleep(600)
+        time.sleep(600)
 
 
 # -------------------------
