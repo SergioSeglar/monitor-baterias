@@ -52,7 +52,7 @@ baterias = [
     ("BATERÍA 8", "http://87.106.124.228:3000/d/mpPEGXkSk/lgv-8-em3223002731001-48v-315ah-gprs_s_23597?orgId=121&refresh=1m"),
     ("BATERÍA 7", "http://87.106.124.228:3000/d/5zlPqHZSz/lgv-7-em3223002713001-48v-315ah-gprs_s_23473?orgId=121&refresh=1m"),
     ("BATERÍA 6", "http://87.106.124.228:3000/d/FjZH7jL4k/lgv-6-em1423001156001-48v-315ah-gprs_s_23177?orgId=121&refresh=1m"),
-    (http://87.106.124.228:3000/d/VXjh1AADz/lgv-1-em1926001340001-48v-315ah-disp-tfts-3557-gprs_w_4g_25678?orgId=121&refresh=5s),
+    ("BATERÍA 1", "http://87.106.124.228:3000/d/VXjh1AADz/lgv-1-em1926001340001-48v-315ah-disp-tfts-3557-gprs_w_4g_25678?orgId=121&refresh=1m"),
 ]
 
 
