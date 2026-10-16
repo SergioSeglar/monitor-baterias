@@ -78,20 +78,27 @@ def crear_driver():
     print("DIAG 0: Preparando Chromium y Selenium...", flush=True)
 
     options = Options()
-    options.add_argument("--headless=new")
+    options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
     options.add_argument("--disable-gpu")
+    options.add_argument("--disable-extensions")
+    options.add_argument("--disable-background-networking")
+    options.add_argument("--disable-renderer-backgrounding")
     options.add_argument("--window-size=1920,1080")
 
     options.binary_location = "/usr/bin/chromium"
 
     driver = webdriver.Chrome(options=options)
-    driver.set_page_load_timeout(45)
+
+    # No esperar indefinidamente a que terminen de cargar todos los recursos.
+    driver.set_page_load_timeout(90)
+    driver.set_script_timeout(30)
 
     print("DIAG 0.1: Chromium iniciado correctamente.", flush=True)
 
     return driver
+
 
 
 # =========================================================
@@ -109,17 +116,32 @@ def login(driver):
 
     print("DIAG 2: Abriendo la página de login...", flush=True)
 
-    try:
-        driver.get(BASE_URL)
+try:
+    driver.get(BASE_URL)
 
-    except Exception as e:
+except Exception as e:
+    print(
+        f"DIAG AVISO: La carga de Grafana tardó demasiado: "
+        f"{type(e).__name__}: {e}",
+        flush=True
+    )
+
+    # Comprobar si, pese al tiempo de espera, el navegador llegó a abrir
+    # una página donde se pueda continuar con el inicio de sesión.
+    try:
         print(
-            f"DIAG ERROR al abrir Grafana: "
-            f"{type(e).__name__}: {e}",
+            f"DIAG URL después del aviso: {driver.current_url}",
             flush=True
         )
+
         print(
-            f"DIAG URL actual: {driver.current_url}",
+            f"DIAG Título después del aviso: {driver.title}",
+            flush=True
+        )
+
+    except Exception as comprobacion:
+        print(
+            f"DIAG ERROR: Chromium no responde: {comprobacion}",
             flush=True
         )
         raise
