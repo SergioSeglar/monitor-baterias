@@ -78,6 +78,10 @@ def crear_driver():
     print("DIAG 0: Preparando Chromium y Selenium...", flush=True)
 
     options = Options()
+
+    # No esperar a que la página termine de cargar por completo
+    options.page_load_strategy = "eager"
+
     options.add_argument("--headless")
     options.add_argument("--no-sandbox")
     options.add_argument("--disable-dev-shm-usage")
@@ -85,14 +89,13 @@ def crear_driver():
     options.add_argument("--disable-extensions")
     options.add_argument("--disable-background-networking")
     options.add_argument("--disable-renderer-backgrounding")
+    options.add_argument("--disable-features=Translate")
     options.add_argument("--window-size=1920,1080")
 
     options.binary_location = "/usr/bin/chromium"
 
     driver = webdriver.Chrome(options=options)
-
-    # No esperar indefinidamente a que terminen de cargar todos los recursos.
-    driver.set_page_load_timeout(90)
+    driver.set_page_load_timeout(45)
     driver.set_script_timeout(30)
 
     print("DIAG 0.1: Chromium iniciado correctamente.", flush=True)
