@@ -113,83 +113,48 @@ def login(driver):
         )
 
     print("DIAG 1: Inicio del login de Grafana.", flush=True)
-
     print("DIAG 2: Abriendo la página de login...", flush=True)
 
-try:
-    driver.get(BASE_URL)
-
-except Exception as e:
-    print(
-        f"DIAG AVISO: La carga de Grafana tardó demasiado: "
-        f"{type(e).__name__}: {e}",
-        flush=True
-    )
-
-    # Comprobar si, pese al tiempo de espera, el navegador llegó a abrir
-    # una página donde se pueda continuar con el inicio de sesión.
     try:
-        print(
-            f"DIAG URL después del aviso: {driver.current_url}",
-            flush=True
-        )
-
-        print(
-            f"DIAG Título después del aviso: {driver.title}",
-            flush=True
-        )
-
-    except Exception as comprobacion:
-        print(
-            f"DIAG ERROR: Chromium no responde: {comprobacion}",
-            flush=True
-        )
-        raise
-
-    print(
-        f"DIAG 3: Página abierta. URL actual: {driver.current_url}",
-        flush=True
-    )
-
-    try:
-        print(
-            f"DIAG 3.1: Título de la página: {driver.title}",
-            flush=True
-        )
-    except Exception:
-        pass
-
-    wait = WebDriverWait(driver, 45)
-
-    print("DIAG 4: Esperando el campo de usuario...", flush=True)
-
-    try:
-        user = wait.until(
-            EC.presence_of_element_located(
-                (By.NAME, "username")
-            )
-        )
-
+        driver.get(BASE_URL)
     except Exception as e:
         print(
-            f"DIAG ERROR: No aparece el campo de usuario: "
+            f"DIAG AVISO al abrir Grafana: "
             f"{type(e).__name__}: {e}",
-            flush=True
-        )
-        print(
-            f"DIAG URL actual: {driver.current_url}",
             flush=True
         )
 
         try:
             print(
-                f"DIAG título actual: {driver.title}",
+                f"DIAG URL actual: {driver.current_url}",
                 flush=True
             )
-        except Exception:
-            pass
+            print(
+                f"DIAG Título actual: {driver.title}",
+                flush=True
+            )
+        except Exception as comprobacion:
+            print(
+                f"DIAG ERROR: Chromium no responde: "
+                f"{type(comprobacion).__name__}: {comprobacion}",
+                flush=True
+            )
+            raise
 
-        raise
+    print(
+        f"DIAG 3: URL actual: {driver.current_url}",
+        flush=True
+    )
+
+    wait = WebDriverWait(driver, 45)
+
+    print("DIAG 4: Buscando el campo de usuario...", flush=True)
+
+    user = wait.until(
+        EC.presence_of_element_located(
+            (By.NAME, "username")
+        )
+    )
 
     print("DIAG 5: Campo de usuario encontrado.", flush=True)
 
@@ -201,54 +166,23 @@ except Exception as e:
     user.send_keys(GRAFANA_USER)
     pwd.send_keys(GRAFANA_PASSWORD)
 
-    print(
-        "DIAG 6: Credenciales introducidas; enviando formulario.",
-        flush=True
-    )
+    print("DIAG 6: Enviando formulario...", flush=True)
 
     driver.find_element(
         By.XPATH,
         "//button[@type='submit']"
     ).click()
 
-    print(
-        "DIAG 7: Formulario enviado; esperando que termine el login...",
-        flush=True
+    print("DIAG 7: Esperando confirmación del acceso...", flush=True)
+
+    WebDriverWait(driver, 45).until(
+        lambda d: "/login" not in d.current_url
     )
 
-    try:
-        WebDriverWait(driver, 45).until(
-            lambda d: "/login" not in d.current_url
-        )
-
-    except Exception as e:
-        print(
-            f"DIAG ERROR: Grafana no confirmó el login: "
-            f"{type(e).__name__}: {e}",
-            flush=True
-        )
-
-        print(
-            f"DIAG URL después del login: {driver.current_url}",
-            flush=True
-        )
-
-        try:
-            print(
-                f"DIAG título después del login: {driver.title}",
-                flush=True
-            )
-        except Exception:
-            pass
-
-        raise
-
     print(
-        f"DIAG 8: Sesión de Grafana iniciada. "
-        f"URL: {driver.current_url}",
+        f"DIAG 8: Sesión iniciada. URL: {driver.current_url}",
         flush=True
     )
-
 
 # =========================================================
 # ESPERA DEL DASHBOARD
